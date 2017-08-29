@@ -32,6 +32,76 @@ cat /dev/null > ~/.bash_history && history -c && exit
 
 Export appliance as .ova file ([centos-7.ova](./centos-7.ova))
 
+
+### Prep work for VBox image
+
+From VirtualBox: `File` > `Import appliance` > `centos-7.ova`
+
+Update network settings based on host-only network configuration in VirtualBox settings.
+
+- locally defined vboxnet2 to be non DHCP at 192.168.58.1/24
+- Update: UUID between multiple VMs if identical using `uuidgen`
+- File: `/etc/sysconfig/network-scripts/ifcfg-enp0s8`
+- From:
+
+    ```
+    TYPE=Ethernet
+    BOOTPROTO=dhcp
+    DEFROUTE=yes
+    IPV4_FAILURE_FATAL=no
+    IPV6INIT=yes
+    IPV6_AUTOCONF=yes
+    IPV6_DEFROUTE=yes
+    IPV6_FAILURE_FATAL=no
+    IPV6_ADDR_GEN_MODE=stable-privacy
+    NAME=enp0s8
+    UUID=803ea389-8557-4aed-a672-cb41760073f1
+    DEVICE=enp0s8
+    ONBOOT=yes
+    PEERDNS=yes
+    PEERROUTES=yes
+    IPV6_PEERDNS=yes
+    IPV6_PEERROUTES=yes
+    ```
+- To:
+
+    ```
+    TYPE=Ethernet
+    BOOTPROTO=static
+    DEFROUTE=yes
+    IPV4_FAILURE_FATAL=no
+    IPV6INIT=yes
+    IPV6_AUTOCONF=yes
+    IPV6_DEFROUTE=yes
+    IPV6_FAILURE_FATAL=no
+    IPV6_ADDR_GEN_MODE=stable-privacy
+    NAME=enp0s8
+    UUID=803ea389-8557-4aed-a672-cb41760073f1
+    DEVICE=enp0s8
+    ONBOOT=yes
+    IPADDR=192.168.58.101
+    NETMASK=255.255.255.0
+    PEERDNS=yes
+    PEERROUTES=yes
+    IPV6_PEERDNS=yes
+    IPV6_PEERROUTES=yes
+    ```
+
+Install packages
+
+```
+yum install epel-release
+yum makecache fast
+yum install net-tools dkms 
+yum groupinstall "Development Tools"
+yum install kernel-devel
+```
+
+Set hostname for multiple instances. In example case using
+
+- galera1.example.com (192.168.58.101)
+- galera2.example.com (192.168.58.102)
+
 ### MariaDB 10.1
 
 Assumes user has latest updates available to CentOS 7 Minimal ISO. All commands should be able to be made by any user with sudo rights.
@@ -44,7 +114,7 @@ sudo yum update
 
 Create: `/etc/yum.repos.d/MariaDB.repo`
 
-```
+```config
 # MariaDB 10.1 CentOS repository list - created 2017-04-23 13:24 UTC
 # http://downloads.mariadb.org/mariadb/repositories/
 [mariadb]
@@ -139,12 +209,13 @@ Make firewall changes persistent
 
 ```
 sudo /etc/init.d/mysql start
-mysql_secure_installation # password galera
+sudo systemctl enable mariadb.service
+mysql_secure_installation # password galera, everything else Y
 ```
 
 File `initialize.sql`
 
-```
+```sql
 CREATE DATABASE ICAT;
 CREATE USER 'irods'@'localhost' IDENTIFIED BY 'temppassword';
 GRANT ALL ON ICAT.* to 'irods'@'localhost';
@@ -162,7 +233,7 @@ mysql -uroot -pgalera < initialize.sql
 
 Create: `/etc/yum.repos.d/RENCI-iRODS.repo`
 
-```
+```config
 # iRODS 4.2.1 packages list
 # https://packages.irods.org
 [renci-irods]
@@ -327,6 +398,7 @@ Run iRODS setup script using `irods.config` file:
 
 ```
 sudo python /var/lib/irods/scripts/setup_irods.py < irods.config
+sudo systemctl enable irods
 ```
 
 Dump the entire database as `db.sql`
@@ -336,6 +408,8 @@ mysqldump -uroot -pgalera --all-databases > db.sql
 ```
 
 ### Enable Galera Cluster
+
+Ensure that SELinux is **disabled**
 
 ```
 sudo /etc/init.d/mysql stop
@@ -348,10 +422,10 @@ Update `[galera]` settings in: `/etc/my.cnf.d/server.cnf`
 # Mandatory settings
 wsrep_on=ON
 wsrep_provider=/usr/lib64/galera/libgalera_smm.so
-wsrep_cluster_address='gcomm://192.168.56.101,192.168.56.102'
+wsrep_cluster_address='gcomm://192.168.58.101,192.168.58.102'
 wsrep_cluster_name='galera'
-wsrep_node_address='192.168.56.101'
-wsrep_node_name='galera1'
+wsrep_node_address='192.168.58.101'
+wsrep_node_name='galera-1'
 wsrep_sst_method=rsync
 
 binlog_format=row
@@ -362,23 +436,31 @@ bind-address=0.0.0.0
 
 Start the database with the `[galera]` configuration.
 
-- If this is the first node to stand-up, use:
+1. Execute `/usr/bin/mysqld_safe --wsrep-new-cluster` on the cluster's first master node
+2. Bring up the other nodes in the cluster by executing
+    - `sudo systemctl start mariadb.service`
+    - `sudo systemctl start irods`
+3. Execute `sudo pkill -SIGQUIT mysqld` on the master
+4. Execute `sudo systemctl start mariadb.service` and `sudo systemctl start irods` on the master
 
-	```
-	sudo /etc/init.d/mysql start --wsrep-new-cluster
-	```
-- Otherwise use:
+After two node cluster is up it should show size = 2
 
-	```
-	sudo /etc/init.d/mysql start
-	```
+```
+$ mysql -uroot -pgalera -e "SHOW STATUS LIKE 'wsrep_cluster_size';"
++--------------------+-------+
+| Variable_name      | Value |
++--------------------+-------+
+| wsrep_cluster_size | 2     |
++--------------------+-------+
+```
+
 
 **NOTE**:
 
 If the start command fails, check SELinux settings.
 
 ```
-$ sudo /etc/init.d/mysql start
+$ sudo systemctl start mariadb.service
 Starting mysql (via systemctl):  Job for mariadb.service failed because the control process exited with error code. See "systemctl status mariadb.service" and "journalctl -xe" for details.
                                                            [FAILED]
 ```
@@ -415,63 +497,20 @@ $ sudo reboot
 After reboot:
 
 ```
-$ sudo /etc/init.d/mysql start
+$ sudo systemctl start mariadb.service
 [sudo] password for galera:
 Starting mysql (via systemctl):                            [  OK  ]
 ```
 
 For error checking: `journalctl -u mariadb`
 
+
+
 ---
 
 ### Notes
 
-Check SELinux (Want disabled)
-
-```
-$ sudo cat /etc/sysconfig/selinux
-
-# This file controls the state of SELinux on the system.
-# SELINUX= can take one of these three values:
-#     enforcing - SELinux security policy is enforced.
-#     permissive - SELinux prints warnings instead of enforcing.
-#     disabled - No SELinux policy is loaded.
-SELINUX=enforcing
-# SELINUXTYPE= can take one of three two values:
-#     targeted - Targeted processes are protected,
-#     minimum - Modification of targeted policy. Only selected processes are protected.
-#     mls - Multi Level Security protection.
-SELINUXTYPE=targeted
-```
-
-For error checking: `journalctl -u mariadb`
-
-For network info: `yum install net-tools`
-
-```
-netstat -tuplen | grep sql
-netstat -ntpl | grep sql
-```
-
-
-/etc/my.cnf
-
-```
-#
-# This group is read both both by the client and the server
-# use it for options that affect everything
-#
-[client-server]
-
-#
-# include all files from the config directory
-#
-!includedir /etc/my.cnf.d
-[mysqld]
-log_bin_trust_function_creators=1
-```
-
-Expected iRODS output:
+Expected iRODS installation output:
 
 ```
 $ sudo python /var/lib/irods/scripts/setup_irods.py < irods.config
@@ -646,3 +685,42 @@ irods_encryption_salt_size - 8
 irods_environment_file - /var/lib/irods/.irods/irods_environment.json
 irods_default_number_of_transfer_threads - 4
 ```
+
+### Items that need to be the same across all deployments
+
+1. iRODS database user and password, shown as **'irods'@'localhost'** and **'temppassword'** below
+
+    ```
+    CREATE DATABASE ICAT;
+    CREATE USER 'irods'@'localhost' IDENTIFIED BY 'temppassword';
+    GRANT ALL ON ICAT.* to 'irods'@'localhost';
+    SHOW GRANTS FOR 'irods'@'localhost';
+    ```
+2. iRODS configuration
+
+    ```
+    irods
+    irods
+    1
+    2
+    localhost
+    3306
+    ICAT
+    irods
+    yes
+    temppassword
+    tempsalt
+    tempZone
+    1247
+    20000
+    20199
+    1248
+    file:///var/lib/irods/configuration_schemas
+    rods
+    yes
+    TEMPORARY_zone_key
+    TEMPORARY_32byte_negotiation_key
+    TEMPORARY__32byte_ctrl_plane_key
+    rodspassword
+    /var/lib/irods/Vault
+    ```
