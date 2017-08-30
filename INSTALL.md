@@ -1,4 +1,4 @@
-# CentOS 7 - Galera VM - VirtualBox
+# CentOS 7 - Galera VM Setup - VirtualBox
 
 ## Installation
 
@@ -90,11 +90,11 @@ Update network settings based on host-only network configuration in VirtualBox s
 Install packages
 
 ```
-yum install epel-release
-yum makecache fast
-yum install net-tools dkms 
-yum groupinstall "Development Tools"
-yum install kernel-devel
+sudo yum install -y epel-release
+sudo yum makecache fast
+sudo yum install -y net-tools dkms 
+sudo yum groupinstall -y "Development Tools"
+sudo yum install -y kernel-devel
 ```
 
 Set hostname for multiple instances. In example case using
@@ -158,29 +158,6 @@ Reference: [opening-ports-for-galera-cluster](http://galeracluster.com/documenta
 1. Enable the database service for FirewallD:
 
 	```
-	sudo firewall-cmd --zone=public --add-service=mysql
-	```
-
-2. Open the TCP ports for Galera Cluster:
-
-	```
-	sudo firewall-cmd --zone=public --add-port=3306/tcp
-	sudo firewall-cmd --zone=public --add-port=4567/tcp
-	sudo firewall-cmd --zone=public --add-port=4568/tcp
-	sudo firewall-cmd --zone=public --add-port=4444/tcp
-	```
-
-3. Optionally, in the event that you would like to use multicast replication, run this command as well to open UDP transport on 4567:
-
-	```
-	sudo firewall-cmd --zone=public --add-port=4567/udp
-	```
-
-Make firewall changes persistent
-
-1. Enable the database service for FirewallD:
-
-	```
 	sudo firewall-cmd --zone=public --permanent --add-service=mysql
 	```
 
@@ -204,6 +181,39 @@ Make firewall changes persistent
 	```
 	sudo firewall-cmd --reload
 	```
+
+**iptables port configuration**
+
+1. Open the TCP for Galera Cluster:
+
+    ```
+    sudo iptables -A INPUT -p tcp -m state --state NEW -m tcp --dport 3306 -j ACCEPT
+    sudo iptables -A INPUT -p tcp -m state --state NEW -m tcp --dport 4567 -j ACCEPT
+    sudo iptables -A INPUT -p tcp -m state --state NEW -m tcp --dport 4568 -j ACCEPT
+    sudo iptables -A INPUT -p tcp -m state --state NEW -m tcp --dport 4444 -j ACCEPT
+    ```
+
+2. Optionally, in the event that you would like to use multicast replication, run this command as well to open UDP transport on 4567:
+
+    ```
+    sudo iptables -A INPUT -p udp -m state --state NEW -m udp --dport 4567 -j ACCEPT
+    ```
+
+3. Configure save on stop and save on restart in `/etc/sysconfig/iptables-config`
+
+- From:
+
+    ```
+    IPTABLES_SAVE_ON_STOP="no"
+    IPTABLES_SAVE_ON_RESTART="no"
+    ```
+- To:
+    
+    ```
+    IPTABLES_SAVE_ON_STOP="yes"
+    IPTABLES_SAVE_ON_RESTART="yes"
+    ```
+
 
 **Run the server**
 
@@ -260,19 +270,9 @@ wget https://dev.mysql.com/get/Downloads/Connector-ODBC/5.3/mysql-connector-odbc
 sudo yum --nogpgcheck localinstall -y mysql-connector-odbc-5.3.7-1.el7.x86_64.rpm
 ```
 
-**Firewalld port configuration**
+**Firewalld port configuration for iRODS**
 
 Reference: [www.firewalld.org](http://www.firewalld.org/documentation/)
-
-1. Open the TCP ports for iRODS services:
-
-	```
-	sudo firewall-cmd --zone=public --add-port=1247/tcp
-	sudo firewall-cmd --zone=public --add-port=1248/tcp
-	sudo firewall-cmd --zone=public --add-port=20000-20199/tcp
-	```
-
-Make firewall changes persistent across reboots
 
 1. Open the TCP ports for iRODS services:
 
@@ -287,6 +287,15 @@ Make firewall changes persistent across reboots
 	```
 	sudo firewall-cmd --reload
 	```
+**iptables port configuration**
+	
+1. Open the TCP for Galera Cluster:
+
+```
+sudo iptables -A INPUT -p tcp -m state --state NEW -m tcp --dport 1247 -j ACCEPT
+sudo iptables -A INPUT -p tcp -m state --state NEW -m tcp --dport 1248 -j ACCEPT
+sudo iptables -A INPUT -p tcp --match multiport --dports 20000:20199 -j ACCEPT
+```
 
 **my.cnf**
 
@@ -320,6 +329,8 @@ Update `/etc/my.cnf`:
 	[mysqld]
 	log_bin_trust_function_creators=1
 	```
+
+Restart the MariaDB server
 	
 ```
 sudo /etc/init.d/mysql start
@@ -401,6 +412,16 @@ sudo python /var/lib/irods/scripts/setup_irods.py < irods.config
 sudo systemctl enable irods
 ```
 
+If an account named **irods** did not already exist on the system, the installer script will create a service account with that name.
+
+```
+# id irods
+uid=995(irods) gid=993(irods) groups=993(irods)
+# cat /etc/passwd
+...
+irods:x:995:993:iRODS Administrator:/var/lib/irods:/bin/bash
+```
+
 Dump the entire database as `db.sql`
 
 ```
@@ -422,6 +443,7 @@ Update `[galera]` settings in: `/etc/my.cnf.d/server.cnf`
 # Mandatory settings
 wsrep_on=ON
 wsrep_provider=/usr/lib64/galera/libgalera_smm.so
+wsrep_provider_options='evs.keepalive_period=PT3S;evs.suspect_timeout=PT30S;evs.inactive_timeout=PT1M;evs.install_timeout=PT1M;evs.join_retrans_period=PT1.5S'
 wsrep_cluster_address='gcomm://192.168.58.101,192.168.58.102'
 wsrep_cluster_name='galera'
 wsrep_node_address='192.168.58.101'
@@ -436,7 +458,7 @@ bind-address=0.0.0.0
 
 Start the database with the `[galera]` configuration.
 
-1. Execute `/usr/bin/mysqld_safe --wsrep-new-cluster` on the cluster's first master node
+1. Execute `sudo /usr/bin/mysqld_safe --wsrep-new-cluster` on the cluster's first master node
 2. Bring up the other nodes in the cluster by executing
     - `sudo systemctl start mariadb.service`
     - `sudo systemctl start irods`
@@ -505,6 +527,33 @@ Starting mysql (via systemctl):                            [  OK  ]
 For error checking: `journalctl -u mariadb`
 
 
+### iRODS resources
+
+The default installation of iRODS will create a resource named **demoResc** in the Vault location. The distributed iCAT provider model will not know what to do with this resource as each node will have it's own notion of what demoResc should be.
+
+1. Create a new default resource dedicated to each node
+
+- Example: from galera1.example.com
+
+    ```
+    $ iadmin mkresc galera1Resc unixfilesystem galera1.example.com:/var/lib/irods/Vault
+    Creating resource:
+    Name:		"galera1Resc"
+    Type:		"unixfilesystem"
+    Host:		"galera1.example.com"
+    Path:		"/var/lib/irods/Vault"
+    Context:	""
+    ```
+
+2. Delete the demoResc resource from any of the nodes and the change will effect all nodes
+
+    ```
+    $ iadmin rmresc demoResc
+    ```
+
+3. Replace **demoResc** with the new default resource name where appropriate. This is typically in the `/etc/irods/server_config.json`, `/etc/irods/core.re` and `/var/lib/irods/.irods/irods_environment.json` files.
+
+- Modifications will take effect immediately without requiring a restart of the server
 
 ---
 
@@ -724,3 +773,12 @@ irods_default_number_of_transfer_threads - 4
     rodspassword
     /var/lib/irods/Vault
     ```
+
+
+### mysql\_secure\_installation
+
+Setting root password
+
+```
+mysql_secure_installation # password galera, everything else Y
+```
