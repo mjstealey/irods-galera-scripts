@@ -193,7 +193,9 @@ sudo yum install -y \
 	jemalloc
 ```
 
-**Firewalld port configuration**
+### Firewall Configuraiton
+
+**Firewalld port configuration for MariaDB**
 
 Reference: [opening-ports-for-galera-cluster](http://galeracluster.com/documentation-webpages/firewalld.html#opening-ports-for-galera-cluster)
 
@@ -224,7 +226,7 @@ Reference: [opening-ports-for-galera-cluster](http://galeracluster.com/documenta
 	sudo firewall-cmd --reload
 	```
 
-**iptables port configuration**
+**iptables port configuration for MariaDB**
 
 1. Open the TCP for Galera Cluster:
 
@@ -267,6 +269,8 @@ Reference: [opening-ports-for-galera-cluster](http://galeracluster.com/documenta
     ```
     sudo service iptables restart
     ```
+
+### MariaDB service
 
 **Start the MariaDB service**
 
@@ -334,6 +338,8 @@ wget https://dev.mysql.com/get/Downloads/Connector-ODBC/5.3/mysql-connector-odbc
 sudo yum --nogpgcheck localinstall -y mysql-connector-odbc-5.3.7-1.el7.x86_64.rpm
 ```
 
+### Firewall Configuration
+
 **Firewalld port configuration for iRODS**
 
 Reference: [www.firewalld.org](http://www.firewalld.org/documentation/)
@@ -352,7 +358,7 @@ Reference: [www.firewalld.org](http://www.firewalld.org/documentation/)
 	sudo firewall-cmd --reload
 	```
 	
-**iptables port configuration**
+**iptables port configuration for iRODS**
 	
 1. Open the TCP for Galera Cluster:
 
@@ -374,6 +380,8 @@ Reference: [www.firewalld.org](http://www.firewalld.org/documentation/)
     ```
     sudo service iptables restart
     ```
+
+### Configure my.cnf
 
 **my.cnf**
 
@@ -413,6 +421,8 @@ Restart the MariaDB server
 ```
 sudo systemctl start mariadb.service
 ```
+
+### Configure iRODS
 
 **iRODS Configuration**
 
