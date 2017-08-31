@@ -178,7 +178,6 @@ sudo yum install -y \
 	nc \
 	boost-program-options \
 	iproute \
-	iptables\
 	libaio \
 	libmnl \
 	libnetfilter_conntrack \
