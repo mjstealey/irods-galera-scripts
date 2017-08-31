@@ -1,6 +1,8 @@
-# CentOS 7 - Galera VM Setup
+# iRODS Galera Cluster Installation
 
-## VirtualBox Installation
+Jump to the [General Installation](#general) section if deploying on bare metal or virtual machines running CentOS 7. Otherwise continue to the [VirtualBox Installation](#virtbox) section.
+
+## <a name="virtbox"></a>VirtualBox Installation
 
 Using CentOS 7 [Minimal ISO](http://isoredirect.centos.org/centos/7/isos/x86_64/CentOS-7-x86_64-Minimal-1611.iso) as the base image, install MariaDB 10.1 and iRODS 4.2.1, then configure to use as Galera Cluster.
 
@@ -102,7 +104,7 @@ Set hostname for multiple instances. In example case using
 - galera1.example.com (192.168.58.101)
 - galera2.example.com (192.168.58.102)
 
-## General Installation
+## <a name="general"></a>General Installation
 
 Assumes user has latest updates available to CentOS 7 and that SELinux is disabled to allow MariaDB Galera to work. 
 
