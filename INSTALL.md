@@ -92,9 +92,9 @@ Install packages
 ```
 sudo yum install -y epel-release
 sudo yum makecache fast
-sudo yum install -y net-tools dkms 
+sudo yum install -y dkms ### VirtualBox specific
 sudo yum groupinstall -y "Development Tools"
-sudo yum install -y kernel-devel
+sudo yum install -y net-tools kernel-devel
 ```
 
 Set hostname for multiple instances. In example case using
@@ -201,40 +201,61 @@ Reference: [opening-ports-for-galera-cluster](http://galeracluster.com/documenta
 
 3. Configure save on stop and save on restart in `/etc/sysconfig/iptables-config`
 
-- From:
-
-    ```
-    IPTABLES_SAVE_ON_STOP="no"
-    IPTABLES_SAVE_ON_RESTART="no"
-    ```
-- To:
+    - From:
     
+        ```
+        IPTABLES_SAVE_ON_STOP="no"
+        IPTABLES_SAVE_ON_RESTART="no"
+        ```
+    - To:
+        
+        ```
+        IPTABLES_SAVE_ON_STOP="yes"
+        IPTABLES_SAVE_ON_RESTART="yes"
+        ```
+4. Address preexisting `REJECT --reject-with icmp-host-prohibited`
+
     ```
-    IPTABLES_SAVE_ON_STOP="yes"
-    IPTABLES_SAVE_ON_RESTART="yes"
+    sudo iptables -D INPUT -j REJECT --reject-with icmp-host-prohibited
+    sudo iptables -A INPUT -j REJECT --reject-with icmp-host-prohibited
+    ```
+    
+5. Restart the iptables service
+
+    ```
+    sudo service iptables restart
     ```
 
-
-**Run the server**
+**Start the MariaDB service**
 
 ```
-sudo /etc/init.d/mysql start
+sudo systemctl start mariadb.service
 sudo systemctl enable mariadb.service
+```
+
+Create init file for iRODS databse and user as: `initialize.sql`
+
+- initialize.sql
+
+    ```sql
+    CREATE DATABASE ICAT;
+    CREATE USER 'irods'@'localhost' IDENTIFIED BY 'temppassword';
+    GRANT ALL ON ICAT.* to 'irods'@'localhost';
+    SHOW GRANTS FOR 'irods'@'localhost';
+    ```
+
+Initialize database for iRODS use
+
+```
+mysql -uroot < initialize.sql
+```
+
+**mysql\_secure\_installation**
+
+**NOTE**: This should only be performed on **ONE** node with an agreed upon password. Once the individual databases are formed into a cluster this setting will propogate across all of them.
+
+```
 mysql_secure_installation # password galera, everything else Y
-```
-
-File `initialize.sql`
-
-```sql
-CREATE DATABASE ICAT;
-CREATE USER 'irods'@'localhost' IDENTIFIED BY 'temppassword';
-GRANT ALL ON ICAT.* to 'irods'@'localhost';
-SHOW GRANTS FOR 'irods'@'localhost';
-```
-Initialize database
-
-```
-mysql -uroot -pgalera < initialize.sql
 ```
 
 ### iRODS v.4.2.1
@@ -254,6 +275,7 @@ gpgcheck=1
 repo_gpgcheck=1
 gpgkey=https://packages.irods.org/irods-signing-key.asc
 ```
+Install iRODS
 
 ```
 sudo yum makecache fast -y
@@ -262,7 +284,7 @@ sudo yum install -y \
 	irods-database-plugin-mysql-4.2.1
 ```
 
-Update mysql-connector-odbc
+Update mysql-connector-odbc package
 
 ```
 sudo yum install -y wget
@@ -287,20 +309,34 @@ Reference: [www.firewalld.org](http://www.firewalld.org/documentation/)
 	```
 	sudo firewall-cmd --reload
 	```
+	
 **iptables port configuration**
 	
 1. Open the TCP for Galera Cluster:
 
-```
-sudo iptables -A INPUT -p tcp -m state --state NEW -m tcp --dport 1247 -j ACCEPT
-sudo iptables -A INPUT -p tcp -m state --state NEW -m tcp --dport 1248 -j ACCEPT
-sudo iptables -A INPUT -p tcp --match multiport --dports 20000:20199 -j ACCEPT
-```
+    ```
+    sudo iptables -A INPUT -p tcp -m state --state NEW -m tcp --dport 1247 -j ACCEPT
+    sudo iptables -A INPUT -p tcp -m state --state NEW -m tcp --dport 1248 -j ACCEPT
+    sudo iptables -A INPUT -p tcp --match multiport --dports 20000:20199 -j ACCEPT
+    ```
+
+2. Address preexisting `REJECT --reject-with icmp-host-prohibited`
+
+    ```
+    sudo iptables -D INPUT -j REJECT --reject-with icmp-host-prohibited
+    sudo iptables -A INPUT -j REJECT --reject-with icmp-host-prohibited
+    ```
+    
+3. Restart the iptables service
+
+    ```
+    sudo service iptables restart
+    ```
 
 **my.cnf**
 
 ```
-sudo /etc/init.d/mysql stop
+sudo systemctl stop mariadb.service
 ```
 
 Update `/etc/my.cnf`:
@@ -333,7 +369,7 @@ Update `/etc/my.cnf`:
 Restart the MariaDB server
 	
 ```
-sudo /etc/init.d/mysql start
+sudo systemctl start mariadb.service
 ```
 
 **iRODS Configuration**
@@ -399,7 +435,7 @@ rodspassword
 /var/lib/irods/Vault
 ```
 
-Symlink `mysql.sock` to correspond with expected location.
+Symlink `mysql.sock` to correspond with expected location. Because we are using MySQL drivers iRODS will expect the `mysql.sock` file to be in a different place.
 
 ```
 sudo ln -s /var/lib/mysql/mysql.sock /tmp/mysql.sock
@@ -412,7 +448,16 @@ sudo python /var/lib/irods/scripts/setup_irods.py < irods.config
 sudo systemctl enable irods
 ```
 
-If an account named **irods** did not already exist on the system, the installer script will create a service account with that name.
+If an account named **irods** did not already exist on the system, the installer script will create a service account with that name. Reference in [irods_setup.py](https://github.com/irods/irods/blob/4-2-stable/scripts/setup_irods.py#L200-L223).
+
+- Manual implementaion
+
+    ```
+    sudo groupadd -r irods
+    sudo useradd -r -d /var/lib/irods -M -s /bin/bash -g irods -c "iRODS Administrator" -p ! irods
+    ```
+
+Example from CentOS 7 - VirtualBox
 
 ```
 # id irods
@@ -425,15 +470,22 @@ irods:x:995:993:iRODS Administrator:/var/lib/irods:/bin/bash
 Dump the entire database as `db.sql`
 
 ```
-mysqldump -uroot -pgalera --all-databases > db.sql
+mysqldump -uroot --all-databases > db.sql
 ```
+
+- NOTE: if `mysql_secure_installation` has already been run, then password is required
+
+    ```
+    mysqldump -uroot -pgalera --all-databases > db.sql
+    ```
 
 ### Enable Galera Cluster
 
 Ensure that SELinux is **disabled**
 
 ```
-sudo /etc/init.d/mysql stop
+sudo systemctl stop irods
+sudo systemctl stop mariadb.service
 ```
 
 Update `[galera]` settings in: `/etc/my.cnf.d/server.cnf`
@@ -456,7 +508,7 @@ innodb_autoinc_lock_mode=2
 bind-address=0.0.0.0
 ```
 
-Start the database with the `[galera]` configuration.
+Start the database using the updated `[galera]` configuration.
 
 1. Execute `sudo /usr/bin/mysqld_safe --wsrep-new-cluster` on the cluster's first master node
 2. Bring up the other nodes in the cluster by executing
@@ -531,6 +583,8 @@ For error checking: `journalctl -u mariadb`
 
 The default installation of iRODS will create a resource named **demoResc** in the Vault location. The distributed iCAT provider model will not know what to do with this resource as each node will have it's own notion of what demoResc should be.
 
+Perform the following as the administrative **irods** user.
+
 1. Create a new default resource dedicated to each node
 
 - Example: from galera1.example.com
@@ -545,14 +599,17 @@ The default installation of iRODS will create a resource named **demoResc** in t
     Context:	""
     ```
 
-2. Delete the demoResc resource from any of the nodes and the change will effect all nodes
+2. Delete the demoResc resource **ONLY ONCE** from any of the nodes and the change will effect all nodes
 
     ```
     $ iadmin rmresc demoResc
     ```
 
-3. Replace **demoResc** with the new default resource name where appropriate. This is typically in the `/etc/irods/server_config.json`, `/etc/irods/core.re` and `/var/lib/irods/.irods/irods_environment.json` files.
+3. Replace **demoResc** with the new default resource name where appropriate. This is typically in:
 
+-  `/etc/irods/server_config.json` - 1 instance 
+-  `/etc/irods/core.re`- 2 instances 
+-  `/var/lib/irods/.irods/irods_environment.json` - 1 instance
 - Modifications will take effect immediately without requiring a restart of the server
 
 ---
@@ -737,7 +794,8 @@ irods_default_number_of_transfer_threads - 4
 
 ### Items that need to be the same across all deployments
 
-1. iRODS database user and password, shown as **'irods'@'localhost'** and **'temppassword'** below
+1. The root **password** must be the same if users plan on running `mysql_secure_installation` on more than a single node during the setup and installation process.
+2. iRODS database user and password, shown as **'irods'@'localhost'** and **'temppassword'** below
 
     ```
     CREATE DATABASE ICAT;
@@ -745,40 +803,50 @@ irods_default_number_of_transfer_threads - 4
     GRANT ALL ON ICAT.* to 'irods'@'localhost';
     SHOW GRANTS FOR 'irods'@'localhost';
     ```
-2. iRODS configuration
+3. iRODS configuration (marked with *)
 
     ```
     irods
     irods
-    1
-    2
-    localhost
-    3306
-    ICAT
-    irods
+    * 1
+    * 2
+    * localhost
+    * 3306
+    * ICAT
+    * irods
     yes
-    temppassword
-    tempsalt
-    tempZone
-    1247
-    20000
-    20199
-    1248
-    file:///var/lib/irods/configuration_schemas
-    rods
+    * temppassword
+    * tempsalt
+    * tempZone
+    * 1247
+    * 20000
+    * 20199
+    * 1248
+    * file:///var/lib/irods/configuration_schemas
+    * rods
     yes
-    TEMPORARY_zone_key
-    TEMPORARY_32byte_negotiation_key
-    TEMPORARY__32byte_ctrl_plane_key
-    rodspassword
+    * TEMPORARY_zone_key
+    * TEMPORARY_32byte_negotiation_key
+    * TEMPORARY__32byte_ctrl_plane_key
+    * rodspassword
     /var/lib/irods/Vault
     ```
+4. Galera settings (marked with *)
 
-
-### mysql\_secure\_installation
-
-Setting root password
-
-```
-mysql_secure_installation # password galera, everything else Y
-```
+    ```
+    [galera]
+    # Mandatory settings
+    * wsrep_on=ON
+    * wsrep_provider=/usr/lib64/galera/libgalera_smm.so
+    * wsrep_provider_options='evs.keepalive_period=PT3S;evs.suspect_timeout=PT30S;evs.inactive_timeout=PT1M;evs.install_timeout=PT1M;evs.join_retrans_period=PT1.5S'
+    * wsrep_cluster_address='gcomm://192.168.58.101,192.168.58.102'
+    * wsrep_cluster_name='galera'
+    wsrep_node_address='192.168.58.101'
+    wsrep_node_name='galera-1'
+    * wsrep_sst_method=rsync
+    
+    * binlog_format=row
+    * default_storage_engine=InnoDB
+    * innodb_autoinc_lock_mode=2
+    * bind-address=0.0.0.0
+    ```
