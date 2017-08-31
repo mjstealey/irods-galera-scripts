@@ -252,7 +252,7 @@ mysql -uroot < initialize.sql
 
 **mysql\_secure\_installation**
 
-**NOTE**: This should only be performed on **ONE** node with an agreed upon password. Once the individual databases are formed into a cluster this setting will propogate across all of them.
+**NOTE**: This should only be performed on **ONE** node with an agreed upon password. Once the individual databases are formed into a cluster this setting will propagate across all of them.
 
 ```
 mysql_secure_installation # password galera, everything else Y
@@ -450,7 +450,7 @@ sudo systemctl enable irods
 
 If an account named **irods** did not already exist on the system, the installer script will create a service account with that name. Reference in [irods_setup.py](https://github.com/irods/irods/blob/4-2-stable/scripts/setup_irods.py#L200-L223).
 
-- Manual implementaion
+- Manual implementation
 
     ```
     sudo groupadd -r irods
